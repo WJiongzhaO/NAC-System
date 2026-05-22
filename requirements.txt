@@ -1,0 +1,24 @@
+# ASR: paraformer-zh-streaming-v2 (FunASR 流式主力)
+funasr>=1.0.0
+modelscope>=1.14.0
+
+# LLM: DeepSeek-V4-Flash API (OpenAI-compatible)
+openai>=1.30.0
+
+# TTS: Piper TTS (ONNX 架构，轻量零显存)
+piper-tts>=1.2.0
+
+# Audio processing
+soundfile>=0.12.0
+librosa>=0.10.0
+pydub>=0.25.0
+audioread>=3.0.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Utilities
+numpy>=1.24.0
+pyyaml>=6.0
+requests>=2.28.0
+tqdm>=4.64.0

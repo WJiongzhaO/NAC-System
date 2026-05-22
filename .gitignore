@@ -1,0 +1,27 @@
+# 环境变量 — 包含 API Key，严禁提交
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# 虚拟环境
+.venv/
+
+# 模型文件（体积大，按需本地下载）
+pretrained_models/
+
+# 输出文件
+output/
+
+# 文档（本地参考，不上传）
+作业解读与项目初步规划.md
+docs/
+report/
+
+# IDE
+.idea/
+.vscode/
+.claude/

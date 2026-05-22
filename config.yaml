@@ -1,0 +1,76 @@
+# ============================================================
+# NAC-System 配置文件 — A.2 级联式造船语音问答系统（轻量方案）
+# ============================================================
+
+# --- ASR 模块 (paraformer-zh-streaming-v2) ---
+asr:
+  model_id: "paraformer-zh"
+  device: "cpu"                # 轻量模型 CPU 即可；GPU 可选 "cuda:0"
+  language: "zh"
+  use_itn: true                # 逆文本正则化
+  # VAD 配置（内置 FSMN-VAD）
+  vad_model: "fsmn-vad"
+  vad_max_segment_time: 30000  # 单段最大时长 (ms)
+  # 热词配置（用于改进阶段，格式: "词1,词2,词3"）
+  hotword: ""
+  hotwords_file: "data/hotwords.txt"
+
+# --- LLM 模块 (DeepSeek-V4-Flash) ---
+llm:
+  api_base: "https://api.deepseek.com"
+  api_key: "${DEEPSEEK_API_KEY}"
+  model: "deepseek-v4-flash"
+  max_tokens: 2048
+  temperature: 0.7
+  stream: false                # 基线模式关闭流式
+  system_prompt: |
+    你是一个专业的造船领域安全问答助手。你需要：
+    1. 用简洁、专业的中文回答与船舶制造、船体结构、焊接工艺、
+       船舶安全规范等相关的问题。
+    2. 如果问题涉及不安全操作，请明确指出风险并给出安全建议。
+    3. 如果问题超出造船领域范围，请礼貌说明你只能回答造船相关问题。
+    4. 回答控制在 3~5 句以内，适合语音播报的长度。
+
+# --- TTS 模块 (Piper TTS / ONNX) ---
+tts:
+  model_name: "zh_CN-huayan-medium"   # Piper 中文语音包
+  # 模型自动下载到 piper 缓存目录
+  device: "cpu"                      # ONNX Runtime，CPU 即可实时合成
+  # 流式配置
+  stream: false                      # 基线模式关闭流式
+  sample_rate: 22050                 # Piper 原生输出采样率
+  # SSML 配置（改进阶段启用）
+  ssml_enabled: false
+  ssml_lexicon: "data/ssml_lexicon.json"
+
+# --- 安全门控模块 ---
+safety:
+  enabled: true
+  blocked_keywords:
+    - "炸弹"
+    - "武器"
+    - "攻击"
+    - "黑客"
+    - "恶意代码"
+  safe_response_text: "抱歉，您的问题涉及不安全内容，我无法回答。请询问造船安全相关的问题。"
+
+# --- 管道配置 ---
+pipeline:
+  audio:
+    sample_rate: 16000
+    channels: 1
+    format: "wav"
+  output:
+    sample_rate: 22050    # Piper 原生输出采样率
+    format: "wav"
+  measure_latency: true
+
+# --- 评测配置 ---
+eval:
+  test_audio_dir: "data/test_audio"
+  output_dir: "output"
+  metrics:
+    - "asr_latency"
+    - "llm_ttft"
+    - "tts_first_packet"
+    - "total_latency"
