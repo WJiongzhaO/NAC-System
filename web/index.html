@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NAC-System 语音问答演示</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel control-panel">
+        <div>
+          <p class="eyebrow">ASR → Safety → LLM → TTS</p>
+          <h1>造船安全语音问答系统</h1>
+        </div>
+
+        <form id="queryForm">
+          <label class="field">
+            <span>运行模式</span>
+            <select name="mode">
+              <option value="streaming" selected>流式低延迟</option>
+              <option value="baseline">串行基线</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>上传语音问题</span>
+            <input name="audio" type="file" accept="audio/*,.wav" />
+          </label>
+
+          <label class="field">
+            <span>或直接输入文本</span>
+            <textarea name="text" rows="5" placeholder="例如：船舶下水前必须完成哪些安全检查？"></textarea>
+          </label>
+
+          <button type="submit">运行问答</button>
+        </form>
+      </section>
+
+      <section class="panel result-panel">
+        <div class="status" id="status">等待输入</div>
+
+        <div class="grid">
+          <article>
+            <h2>安全门控</h2>
+            <p id="safetyText">尚未检测</p>
+          </article>
+          <article>
+            <h2>识别文本</h2>
+            <p id="asrText">-</p>
+          </article>
+          <article class="wide">
+            <h2>回答文本</h2>
+            <p id="answerText">-</p>
+          </article>
+        </div>
+
+        <div class="metrics" id="metrics"></div>
+
+        <div class="player">
+          <audio id="audioPlayer" controls></audio>
+        </div>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

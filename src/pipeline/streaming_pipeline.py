@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from src.asr.paraformer_asr import ParaformerASR
+from src.asr.hotwords import load_hotwords
 from src.llm.deepseek_client import DeepSeekClient
 from src.tts.piper_tts import PiperTTS
 from src.safety.safety_gate import SafetyGate
@@ -38,7 +39,7 @@ class StreamingPipeline:
         hotword: str = "",
         use_filler: bool = True,       # 是否启用衔接语预热
     ):
-        self.hotword = hotword
+        self.hotword = hotword or load_hotwords()
         self.use_filler = use_filler
         self._asr_kwargs = {"model_id": asr_model_id, "device": asr_device}
         self._llm_kwargs = {"api_base": llm_api_base, "api_key": llm_api_key, "model": llm_model}
@@ -127,7 +128,10 @@ class StreamingPipeline:
         safety_check = self.safety.check(asr_text)
         if safety_check["blocked"]:
             print(f"  [拦截] {safety_check['reason']}")
-            llm_text = self.safety.get_safe_response()
+            t.mark("llm_start")
+            llm_text = safety_check.get("response_text") or self.safety.get_safe_response(
+                safety_check.get("category", "unsafe")
+            )
             sentences = self._split_sentences(llm_text)
             filler_path = None
         else:
@@ -137,6 +141,7 @@ class StreamingPipeline:
                 filler_key = random.choice(list(self._filler_cache.keys()))
                 filler_path = self._filler_cache[filler_key]
                 t.mark("filler_start")
+                t.mark("first_playable")
                 print(f"  [衔接语] 即时播放: {filler_path}")
 
             # ---- Stage 4: LLM流式 + TTS逐句 ----
@@ -175,8 +180,7 @@ class StreamingPipeline:
         # 首句添加衔接语前缀
         first_sentence_text = sentences[0] if sentences else ""
         if filler_path and first_sentence_text:
-            # 先写 filler 作为首段输出（已预合成，零延迟）
-            t.mark("first_playable")
+            # filler 已在安全通过后即时可用，此处只记录首段类型。
             print(f"  [首段可播放] filler 即时可用")
 
         first_tts_latency = None
@@ -201,7 +205,7 @@ class StreamingPipeline:
         # ---- 延迟汇总 ----
         asr_lat = asr_result["latency_ms"]
         llm_ttft = t.elapsed_ms("llm_start", "llm_ttft") if "llm_ttft" in t._marks else None
-        llm_total = t.elapsed_ms("llm_start", "llm_end")
+        llm_total = 0 if safety_check["blocked"] else t.elapsed_ms("llm_start", "llm_end")
         tts_first = first_tts_latency or 0
         total = t.elapsed_ms("asr_start", "pipeline_end")
 
@@ -237,7 +241,10 @@ class StreamingPipeline:
             "tts_first_ms": tts_first,
             "first_playable_ms": first_playable,
             "total_ms": total,
+            "safety_blocked": safety_check["blocked"],
+            "safety_category": safety_check.get("category"),
+            "safety_reason": safety_check.get("reason"),
             "filler_path": filler_path,
             "outputs": all_outputs,
-            "first_output": first_tts_path or filler_path,
+            "first_output": filler_path or first_tts_path,
         }

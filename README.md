@@ -32,6 +32,27 @@ cp .env.example .env
 python run_baseline.py data/test_audio/test.wav
 ```
 
+## Web 演示与安全模块
+
+```bash
+# 启动本地前端
+python run_web.py
+# 浏览器打开 http://127.0.0.1:7860
+```
+
+前端支持两种输入：
+
+- 上传 WAV 音频，选择“串行基线”或“流式低延迟”运行完整 ASR → Safety → LLM → TTS 链路。
+- 直接输入文本，用于快速验证安全门控和 TTS 固定安全提示。
+
+安全模块位于 `src/safety/safety_gate.py`，在 ASR 和 LLM 之间执行：
+
+- 有害内容拦截：命中爆炸物、恶意代码、越狱提示等关键词时短路，不调用 LLM。
+- 领域越界拦截：问题不属于造船、船舶制造或船舶安全领域时短路。
+- 固定提示播放：拦截后直接进入 TTS，生成安全提示语音。
+
+ASR 热词位于 `data/hotwords.txt`。默认管线会自动加载该文件，用于提升“肋板、肘板、船艏、轴系校中”等造船术语识别质量。
+
 ## 项目结构
 
 ```
