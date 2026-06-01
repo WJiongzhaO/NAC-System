@@ -23,6 +23,7 @@ class LatencyRecord(TypedDict, total=False):
     llm_total_ms: float
     llm_ttft_ms: float | None
     tts_latency_ms: float
+    first_playable_ms: float
     total_latency_ms: float
     audio_duration_s: float
     asr_text: str
@@ -60,7 +61,7 @@ class EvalRecorder:
             return {}
 
         metrics = {}
-        for key in ["asr_latency_ms", "llm_total_ms", "tts_latency_ms", "total_latency_ms"]:
+        for key in ["asr_latency_ms", "llm_total_ms", "tts_latency_ms", "first_playable_ms", "total_latency_ms"]:
             values = [r[key] for r in self.records if key in r and r[key] is not None]
             if values:
                 metrics[key] = {
@@ -97,6 +98,7 @@ class EvalRecorder:
             "asr_latency_ms": "ASR 延迟",
             "llm_total_ms": "LLM 总耗时",
             "tts_latency_ms": "TTS 延迟",
+            "first_playable_ms": "首段可播放",
             "total_latency_ms": "端到端总延迟",
         }
         for key, label in labels.items():

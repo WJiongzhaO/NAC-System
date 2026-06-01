@@ -61,6 +61,7 @@ def main():
                     "llm_total_ms": result["llm_total_ms"],
                     "llm_ttft_ms": result["llm_ttft_ms"],
                     "tts_latency_ms": result["tts_first_ms"],
+                    "first_playable_ms": result["first_playable_ms"],
                     "total_latency_ms": result["total_ms"],
                     "asr_text": result["asr_text"],
                     "llm_text": result["llm_text"],

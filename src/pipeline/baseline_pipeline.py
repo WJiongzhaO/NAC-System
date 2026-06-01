@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.asr.paraformer_asr import ParaformerASR
+from src.asr.hotwords import load_hotwords
 from src.llm.deepseek_client import DeepSeekClient
 from src.tts.piper_tts import PiperTTS
 from src.safety.safety_gate import SafetyGate
@@ -31,7 +32,7 @@ class BaselinePipeline:
         print("[Pipeline] 初始化基线串行管线")
         print("=" * 60)
 
-        self.hotword = hotword
+        self.hotword = hotword or load_hotwords()
 
         # 按需初始化各模块（延迟加载以节省显存）
         self._asr: ParaformerASR | None = None
@@ -112,11 +113,17 @@ class BaselinePipeline:
 
         if safety_result["blocked"]:
             print(f"  [拦截] {safety_result['reason']}")
-            llm_text = self.safety.get_safe_response()
+            llm_text = safety_result.get("response_text") or self.safety.get_safe_response(
+                safety_result.get("category", "unsafe")
+            )
             record["llm_text"] = llm_text
+            record["safety_blocked"] = True
+            record["safety_category"] = safety_result.get("category")
+            record["safety_reason"] = safety_result.get("reason")
             record["llm_total_ms"] = 0
         else:
             print("  [通过] 未检测到敏感内容")
+            record["safety_blocked"] = False
 
             # ──── Stage 3: LLM ────
             print(f"[Pipeline] [{sample_id}] Stage 3/4: LLM 生成回答...")
