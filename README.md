@@ -43,6 +43,7 @@ python run_web.py
 前端支持两种输入：
 
 - 上传 WAV 音频，选择“串行基线”或“流式低延迟”运行完整 ASR → Safety → LLM → TTS 链路。
+- 点击“开始录音/停止录音”现场录制语音问题，前端会转换为 16k 单声道 WAV 后提交给 ASR。
 - 直接输入文本，用于快速验证安全门控和 TTS 固定安全提示。
 
 安全模块位于 `src/safety/safety_gate.py`，在 ASR 和 LLM 之间执行：

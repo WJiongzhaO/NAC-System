@@ -28,6 +28,15 @@
             <input name="audio" type="file" accept="audio/*,.wav" />
           </label>
 
+          <div class="field">
+            <span>或现场录音</span>
+            <div class="recorder">
+              <button type="button" id="startRecord">开始录音</button>
+              <button type="button" id="stopRecord" disabled>停止录音</button>
+            </div>
+            <p class="record-state" id="recordState">未录音</p>
+          </div>
+
           <label class="field">
             <span>或直接输入文本</span>
             <textarea name="text" rows="5" placeholder="例如：船舶下水前必须完成哪些安全检查？"></textarea>
