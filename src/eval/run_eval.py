@@ -46,18 +46,30 @@ def main():
 
     recorder = EvalRecorder(output_dir=args.output_dir)
 
+    streaming_pipeline = None
+    baseline_pipeline = None
+    if args.mode == "streaming":
+        streaming_pipeline = StreamingPipeline(
+            tts_model_path=TTS_MODEL, hotword=args.hotword
+        )
+        streaming_pipeline.prewarm_fillers(args.output_dir)
+    else:
+        baseline_pipeline = BaselinePipeline(
+            tts_model_path=TTS_MODEL, hotword=args.hotword
+        )
+
     for i, audio_file in enumerate(audio_files, 1):
         print(f"\n─ [{i}/{len(audio_files)}] {audio_file.name}")
 
         try:
             if args.mode == "streaming":
-                pipeline = StreamingPipeline(
-                    tts_model_path=TTS_MODEL, hotword=args.hotword
+                result = streaming_pipeline.run(
+                    str(audio_file), output_dir=args.output_dir
                 )
-                result = pipeline.run(str(audio_file), output_dir=args.output_dir)
                 record = {
                     "sample_id": audio_file.stem,
                     "asr_latency_ms": result["asr_latency_ms"],
+                    "asr_first_chunk_ms": result.get("asr_first_chunk_ms"),
                     "llm_total_ms": result["llm_total_ms"],
                     "llm_ttft_ms": result["llm_ttft_ms"],
                     "tts_latency_ms": result["tts_first_ms"],
@@ -67,10 +79,9 @@ def main():
                     "llm_text": result["llm_text"],
                 }
             else:
-                pipeline = BaselinePipeline(
-                    tts_model_path=TTS_MODEL, hotword=args.hotword
+                record = baseline_pipeline.run(
+                    str(audio_file), output_dir=args.output_dir
                 )
-                record = pipeline.run(str(audio_file), output_dir=args.output_dir)
 
             recorder.add(record)
         except Exception as e:

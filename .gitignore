@@ -1,27 +1,76 @@
-# 环境变量 — 包含 API Key，严禁提交
-.env
+# ============================================================
+# NAC-System — Git 忽略规则
+# ============================================================
 
-# Python
+# --- 密钥与环境 ---
+.env
+.env.local
+.env.*.local
+
+# --- Python ---
 __pycache__/
 *.py[cod]
-*.egg-info/
+*$py.class
+*.so
+.Python
+build/
 dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
-# 虚拟环境
+# 测试 / 类型检查 / 格式化缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --- 虚拟环境 ---
 .venv/
+venv/
+env/
 
-# 模型文件（体积大，按需本地下载）
+# --- 预训练模型（体积大，按需本地下载）---
 pretrained_models/
+*.onnx
+*.onnx.json
+*.pt
+*.pth
+*.bin
 
-# 输出文件
+# --- 管线输出（TTS wav、评测报告、日志等）---
 output/
+*.log
 
-# 文档（本地参考，不上传）
+# --- 生成音频（保留 data/test_audio 评测集）---
+*.wav
+!data/test_audio/*.wav
+
+# --- FunASR / ASR 本地调试探针（实验临时输出）---
+*_probe.txt
+asr_stream_probe*.txt
+asr_kwargs_*.txt
+funasr_*.txt
+
+# --- 本地统计与草稿（不上传）---
+新建文件夹/
 作业解读与项目初步规划.md
 docs/
 report/
 
-# IDE
+# --- 操作系统 ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- IDE / 编辑器 ---
 .idea/
 .vscode/
+.cursor/
 .claude/
+*.swp
+*.swo
+*~

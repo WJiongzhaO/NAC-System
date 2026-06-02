@@ -7,8 +7,10 @@
 3. 首句无缝衔接：filler播放期间LLM已在生成正文
 """
 
+import random
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.asr.paraformer_asr import ParaformerASR
@@ -25,12 +27,18 @@ FILLER_PHRASES = [
     "嗯，请稍等，",
 ]
 
+# 流式 ASR 累计识别达到该字数后再播衔接语，避免单字误触发
+ASR_MIN_CHARS_FOR_FILLER = 4
+
 
 class StreamingPipeline:
     def __init__(
         self,
         asr_model_id: str = "paraformer-zh",
+        asr_streaming_model_id: str = "paraformer-zh-streaming",
         asr_device: str = "cpu",
+        use_asr_streaming: bool = True,
+        asr_streaming_chunk_size: list[int] | None = None,
         llm_api_base: str = "https://api.deepseek.com",
         llm_api_key: str | None = None,
         llm_model: str = "deepseek-v4-flash",
@@ -40,8 +48,16 @@ class StreamingPipeline:
         use_filler: bool = True,       # 是否启用衔接语预热
     ):
         self.hotword = hotword or load_hotwords()
+        self.use_asr_streaming = use_asr_streaming
         self.use_filler = use_filler
-        self._asr_kwargs = {"model_id": asr_model_id, "device": asr_device}
+        self._asr_kwargs = {
+            "model_id": asr_model_id,
+            "streaming_model_id": asr_streaming_model_id,
+            "device": asr_device,
+            "load_offline_model": not use_asr_streaming,
+        }
+        if asr_streaming_chunk_size is not None:
+            self._asr_kwargs["streaming_chunk_size"] = asr_streaming_chunk_size
         self._llm_kwargs = {"api_base": llm_api_base, "api_key": llm_api_key, "model": llm_model}
         self._tts_kwargs = {"model_name": tts_model_name, "model_path": tts_model_path}
         self._asr: ParaformerASR | None = None
@@ -94,14 +110,73 @@ class StreamingPipeline:
         parts = re.split(r"(?<=[。！？])", text)
         return [s.strip() for s in parts if s.strip() and not re.match(r'^[，、的]+$', s.strip())]
 
+    def _run_asr(
+        self,
+        audio_path: str,
+        t: LatencyTimer,
+        filler_path_holder: list,
+    ) -> dict:
+        """
+        流式 ASR：逐 chunk 解码，首块有文本时即可触发衔接语（与后续 ASR 并行）。
+        """
+        started_at = time.perf_counter()
+        final_text = ""
+        first_chunk_ms = None
+        partial_count = 0
+        filler_scheduled = False
+
+        for partial in self.asr.transcribe_streaming_generator(
+            audio_path, hotword=self.hotword
+        ):
+            partial_count += 1
+            final_text = partial["text"]
+
+            text_len = len(partial.get("text", ""))
+            if first_chunk_ms is None and text_len >= 2:
+                first_chunk_ms = partial["latency_ms"]
+                t.mark("asr_first_chunk")
+
+            if (
+                not filler_scheduled
+                and text_len >= ASR_MIN_CHARS_FOR_FILLER
+                and self.use_filler
+                and self._filler_cache
+            ):
+                filler_key = random.choice(list(self._filler_cache.keys()))
+                filler_path_holder.append(self._filler_cache[filler_key])
+                t.mark("filler_start")
+                t.mark("first_playable")
+                filler_scheduled = True
+                print(f"  [衔接语] ASR 首块即播: {filler_path_holder[0]}")
+
+            if partial["is_final"]:
+                break
+
+        total_ms = (time.perf_counter() - started_at) * 1000
+        return {
+            "text": final_text,
+            "latency_ms": total_ms,
+            "first_chunk_ms": first_chunk_ms or total_ms,
+            "chunk_count": partial_count,
+        }
+
+    def _synthesize_sentence(self, output: Path, sample_id: str, index: int, sentence: str) -> dict:
+        """合成单句语音，供并发执行使用。"""
+        out = output / f"{sample_id}_sent{index}.wav"
+        tts_result = self.tts.synthesize(sentence, str(out))
+        return {
+            "sentence_index": index,
+            "audio_path": str(out),
+            "latency_ms": tts_result["latency_ms"],
+            "text": sentence,
+        }
+
     def run(self, audio_path: str, output_dir: str = "output") -> dict:
         """
         流式级联 + 衔接语预热。
 
         Returns dict with latency breakdown.
         """
-        import random
-
         sample_id = Path(audio_path).stem
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
@@ -112,20 +187,27 @@ class StreamingPipeline:
 
         t = LatencyTimer()
 
-        # ---- Stage 1: ASR + VAD ----
-        print(f"\n[Stream] [{sample_id}] ASR+VAD 转写...")
+        # ---- Stage 1: ASR（在线 chunk 流式或整段） ----
+        print(f"\n[Stream] [{sample_id}] ASR 转写...")
         t.mark("asr_start")
-        asr_result = self.asr.transcribe(audio_path, hotword=self.hotword)
+        early_filler: list[str] = []
+        if self.use_asr_streaming:
+            asr_result = self._run_asr(audio_path, t, early_filler)
+        else:
+            asr_result = self.asr.transcribe(audio_path, hotword=self.hotword)
         t.mark("asr_end")
         asr_text = asr_result["text"]
         print(f"  识别: {asr_text[:60]}...")
         print(f"  ASR延迟: {asr_result['latency_ms']:.0f} ms")
+        if self.use_asr_streaming and asr_result.get("first_chunk_ms") is not None:
+            print(f"  ASR首块: {asr_result['first_chunk_ms']:.0f} ms")
 
         # ASR 结束即标记 VAD 尾点（近似）
         t.mark("vad_end")
 
         # ---- Stage 2: Safety ----
         safety_check = self.safety.check(asr_text)
+        filler_path = early_filler[0] if early_filler else None
         if safety_check["blocked"]:
             print(f"  [拦截] {safety_check['reason']}")
             t.mark("llm_start")
@@ -135,9 +217,8 @@ class StreamingPipeline:
             sentences = self._split_sentences(llm_text)
             filler_path = None
         else:
-            # ---- Stage 3: 衔接语预热播放 ----
-            filler_path = None
-            if self.use_filler and self._filler_cache:
+            # ---- Stage 3: 衔接语（流式模式可能在 ASR 首块已触发） ----
+            if filler_path is None and self.use_filler and self._filler_cache:
                 filler_key = random.choice(list(self._filler_cache.keys()))
                 filler_path = self._filler_cache[filler_key]
                 t.mark("filler_start")
@@ -189,16 +270,36 @@ class StreamingPipeline:
         if filler_path:
             all_outputs.append(filler_path)
 
-        for i, sent in enumerate(sentences):
-            if not sent.strip():
-                continue
-            out = output / f"{sample_id}_sent{i}.wav"
-            tts_result = self.tts.synthesize(sent, str(out))
-            if i == 0:
-                first_tts_latency = tts_result["latency_ms"]
-                first_tts_path = str(out)
-                t.mark("tts_first_packet")
-            all_outputs.append(str(out))
+        valid_sentences = [(i, sent) for i, sent in enumerate(sentences) if sent.strip()]
+        if valid_sentences:
+            max_workers = min(4, len(valid_sentences))
+            tts_started = time.perf_counter()
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self._synthesize_sentence,
+                        output,
+                        sample_id,
+                        index,
+                        sentence,
+                    ): index
+                    for index, sentence in valid_sentences
+                }
+
+                completed: list[dict] = []
+                first_completed = False
+                for future in as_completed(futures):
+                    result = future.result()
+                    completed.append(result)
+                    if not first_completed:
+                        first_tts_latency = (time.perf_counter() - tts_started) * 1000
+                        first_tts_path = result["audio_path"]
+                        t.mark("tts_first_packet")
+                        first_completed = True
+
+                for result in sorted(completed, key=lambda item: item["sentence_index"]):
+                    all_outputs.append(result["audio_path"])
 
         t.mark("pipeline_end")
 
@@ -210,9 +311,14 @@ class StreamingPipeline:
         total = t.elapsed_ms("asr_start", "pipeline_end")
 
         # 首段可播放延迟
-        if filler_path and "first_playable" in t._marks and "vad_end" in t._marks:
-            # 衔接语模式：VAD结束 → filler预合成文件即用（几乎零延迟）
-            first_playable = t.elapsed_ms("vad_end", "first_playable")
+        if filler_path and "first_playable" in t._marks:
+            if "asr_first_chunk" in t._marks:
+                # 流式 ASR：首块识别出字即播衔接语（与后续 ASR/LLM 重叠）
+                first_playable = t.elapsed_ms("asr_start", "first_playable")
+            elif "vad_end" in t._marks:
+                first_playable = t.elapsed_ms("vad_end", "first_playable")
+            else:
+                first_playable = t.elapsed_ms("asr_start", "first_playable")
             filler_lat = first_playable
         elif llm_ttft:
             first_playable = llm_ttft + tts_first
@@ -236,6 +342,8 @@ class StreamingPipeline:
             "llm_text": llm_text,
             "sentences": len(sentences),
             "asr_latency_ms": asr_lat,
+            "asr_first_chunk_ms": asr_result.get("first_chunk_ms"),
+            "asr_chunk_count": asr_result.get("chunk_count"),
             "llm_ttft_ms": llm_ttft,
             "llm_total_ms": llm_total,
             "tts_first_ms": tts_first,

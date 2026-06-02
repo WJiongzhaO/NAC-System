@@ -4,11 +4,16 @@
 
 # --- ASR 模块 (paraformer-zh-streaming-v2) ---
 asr:
-  model_id: "paraformer-zh"
+  model_id: "paraformer-zh"              # 离线整段（基线）
+  streaming_model_id: "paraformer-zh-streaming"  # 在线 chunk 流式
   device: "cpu"                # 轻量模型 CPU 即可；GPU 可选 "cuda:0"
   language: "zh"
   use_itn: true                # 逆文本正则化
-  # VAD 配置（内置 FSMN-VAD）
+  # 流式 chunk：[0,10,5] = 600ms 步进 + 300ms 前瞻（FunASR 官方默认）
+  streaming_chunk_size: [0, 10, 5]
+  encoder_chunk_look_back: 4
+  decoder_chunk_look_back: 1
+  # VAD 配置（内置 FSMN-VAD，仅离线 model_id 使用）
   vad_model: "fsmn-vad"
   vad_max_segment_time: 30000  # 单段最大时长 (ms)
   # 热词配置（用于改进阶段，格式: "词1,词2,词3"）

@@ -9,31 +9,12 @@ TTS 模块 — Piper TTS (ONNX / zh_CN-huayan-medium)
 """
 
 import os
-import shutil
-import subprocess
 import tempfile
 import time
 import xml.sax.saxutils as saxutils
 from pathlib import Path
 
-
-def _find_piper_executable() -> str:
-    """查找 piper CLI 可执行文件路径"""
-    # 1. 先查系统 PATH
-    piper_path = shutil.which("piper")
-    if piper_path:
-        return piper_path
-
-    # 2. 查当前 venv 的 Scripts 目录
-    venv_scripts = Path(__file__).resolve().parent.parent.parent / ".venv" / "Scripts"
-    piper_exe = venv_scripts / "piper.exe"
-    if piper_exe.exists():
-        return str(piper_exe)
-
-    return "piper"
-
-
-PIPER_EXECUTABLE = _find_piper_executable()
+from piper import PiperVoice, SynthesisConfig
 
 
 class PiperTTS:
@@ -50,24 +31,49 @@ class PiperTTS:
         self.device = device
         self.ssml_enabled = ssml_enabled
         self.ssml_lexicon = ssml_lexicon or {}
-        self._piper_exe = PIPER_EXECUTABLE
+        self._model_path = self._resolve_model_path(model_path, model_name)
+        self._voice: PiperVoice | None = None
 
-        # 如果指定了本地模型路径，使用路径；否则用模型名
-        self._model_arg = model_path if model_path else model_name
+        if not self._model_path.exists():
+            raise RuntimeError(f"Piper model not found: {self._model_path}")
 
-        # 如用本地路径，验证文件存在
-        if model_path and not Path(model_path).exists():
-            raise RuntimeError(f"Piper model not found: {model_path}")
+    def _resolve_model_path(self, model_path: str | None, model_name: str) -> Path:
+        """解析 Piper 语音模型路径。"""
+        if model_path:
+            return Path(model_path)
 
-        # 验证 piper CLI 可用
+        candidate_paths = [
+            Path("pretrained_models/piper") / f"{model_name}.onnx",
+            Path("pretrained_models/piper") / model_name,
+            Path(model_name),
+        ]
+        for candidate in candidate_paths:
+            if candidate.exists():
+                return candidate
+
+        return candidate_paths[0]
+
+    def _resolve_use_cuda(self) -> bool:
+        """仅在显式要求且运行时可用时启用 CUDA。"""
+        if self.device.lower() != "cuda":
+            return False
+
         try:
-            subprocess.run(
-                [self._piper_exe, "--help"], capture_output=True, text=True, timeout=10
+            import onnxruntime
+
+            return "CUDAExecutionProvider" in onnxruntime.get_available_providers()
+        except Exception:
+            return False
+
+    @property
+    def voice(self) -> PiperVoice:
+        """懒加载并缓存 PiperVoice，避免重复加载模型。"""
+        if self._voice is None:
+            self._voice = PiperVoice.load(
+                self._model_path,
+                use_cuda=self._resolve_use_cuda(),
             )
-        except FileNotFoundError:
-            raise RuntimeError(
-                "piper CLI not found. Run: pip install piper-tts"
-            )
+        return self._voice
 
     def text_to_ssml(self, text: str) -> str:
         """将纯文本转为 SSML，应用发音词典替换"""
@@ -81,17 +87,6 @@ class PiperTTS:
         ssml += f"  {escaped}\n"
         ssml += "</speak>"
         return ssml
-
-    def _build_piper_command(self, text: str, output_path: str) -> list[str]:
-        """构建 piper CLI 命令"""
-        cmd = [
-            self._piper_exe,
-            "--model", self._model_arg,
-            "--output_file", str(output_path),
-        ]
-        if self.ssml_enabled:
-            cmd.append("--ssml")
-        return cmd
 
     def synthesize(self, text: str, output_path: str | None = None) -> dict:
         """
@@ -110,21 +105,17 @@ class PiperTTS:
         """
         output = Path(output_path) if output_path else Path(tempfile.mktemp(suffix=".wav"))
 
-        processed_text = self.text_to_ssml(text)
-        cmd = self._build_piper_command(processed_text, str(output))
-
         t0 = time.perf_counter()
-        proc = subprocess.run(
-            cmd,
-            input=processed_text if self.ssml_enabled else text,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        t1 = time.perf_counter()
+        wav_file = None
+        try:
+            import wave
 
-        if proc.returncode != 0:
-            raise RuntimeError(f"Piper TTS failed: {proc.stderr}")
+            wav_file = wave.open(str(output), "wb")
+            self.voice.synthesize_wav(text, wav_file)
+        finally:
+            if wav_file is not None:
+                wav_file.close()
+        t1 = time.perf_counter()
 
         try:
             import soundfile as sf

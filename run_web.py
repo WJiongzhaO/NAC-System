@@ -12,6 +12,7 @@ import cgi
 import json
 import mimetypes
 import sys
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -90,6 +91,54 @@ class TextRunner:
 
 
 TEXT_RUNNER: TextRunner | None = None
+
+_PIPELINE_LOCK = threading.Lock()
+_STREAMING_PIPELINE: StreamingPipeline | None = None
+_BASELINE_PIPELINE: BaselinePipeline | None = None
+
+
+def warm_streaming_pipeline(pipeline: StreamingPipeline) -> None:
+    """启动时预热：衔接语、filler 所用 TTS、ASR 模型常驻内存。"""
+    pipeline.prewarm_fillers(str(OUTPUT_DIR))
+    if pipeline.use_asr_streaming:
+        _ = pipeline.asr.streaming_model
+    else:
+        _ = pipeline.asr.model
+    _ = pipeline.tts.voice
+
+
+def warm_baseline_pipeline(pipeline: BaselinePipeline) -> None:
+    _ = pipeline.asr
+    _ = pipeline.tts.voice
+
+
+def get_streaming_pipeline() -> StreamingPipeline:
+    """流式管线单例（与 run_eval 一致，避免每次请求重复加载 ASR）。"""
+    global _STREAMING_PIPELINE
+    if _STREAMING_PIPELINE is not None:
+        return _STREAMING_PIPELINE
+    with _PIPELINE_LOCK:
+        if _STREAMING_PIPELINE is None:
+            print("[Web] 初始化流式管线（单例）...")
+            _STREAMING_PIPELINE = StreamingPipeline(tts_model_path=TTS_MODEL)
+            print("[Web] 预热流式管线（衔接语 + ASR + TTS，首次较慢）...")
+            warm_streaming_pipeline(_STREAMING_PIPELINE)
+            print("[Web] 流式管线预热完成")
+    return _STREAMING_PIPELINE
+
+
+def get_baseline_pipeline() -> BaselinePipeline:
+    global _BASELINE_PIPELINE
+    if _BASELINE_PIPELINE is not None:
+        return _BASELINE_PIPELINE
+    with _PIPELINE_LOCK:
+        if _BASELINE_PIPELINE is None:
+            print("[Web] 初始化基线管线（单例）...")
+            _BASELINE_PIPELINE = BaselinePipeline(tts_model_path=TTS_MODEL)
+            print("[Web] 预热基线管线（ASR + TTS）...")
+            warm_baseline_pipeline(_BASELINE_PIPELINE)
+            print("[Web] 基线管线预热完成")
+    return _BASELINE_PIPELINE
 
 
 def output_url(path: str | Path | None) -> str | None:
@@ -177,8 +226,9 @@ class WebHandler(BaseHTTPRequestHandler):
                 f.write(audio_item.file.read())
 
             if mode == "baseline":
-                pipeline = BaselinePipeline(tts_model_path=TTS_MODEL)
-                record = pipeline.run(str(upload_path), output_dir=str(OUTPUT_DIR))
+                record = get_baseline_pipeline().run(
+                    str(upload_path), output_dir=str(OUTPUT_DIR)
+                )
                 response = {
                     "mode": "baseline",
                     "asr_text": record.get("asr_text", ""),
@@ -197,8 +247,9 @@ class WebHandler(BaseHTTPRequestHandler):
                     "audio_url": output_url(OUTPUT_DIR / f"{upload_path.stem}_output.wav"),
                 }
             else:
-                pipeline = StreamingPipeline(tts_model_path=TTS_MODEL)
-                result = pipeline.run(str(upload_path), output_dir=str(OUTPUT_DIR))
+                result = get_streaming_pipeline().run(
+                    str(upload_path), output_dir=str(OUTPUT_DIR)
+                )
                 response = {
                     "mode": "streaming",
                     "asr_text": result.get("asr_text", ""),
@@ -247,8 +298,15 @@ class WebHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    print("[Web] 服务启动：预加载流式管线（请等待模型就绪）...")
+    get_streaming_pipeline()
+
     server = ThreadingHTTPServer(("127.0.0.1", 7860), WebHandler)
     print("NAC-System Web Demo: http://127.0.0.1:7860")
+    print("流式管线已预热；基线模式将在首次使用时加载。")
     print("按 Ctrl+C 停止服务。")
     server.serve_forever()
 
