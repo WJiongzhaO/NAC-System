@@ -56,7 +56,6 @@ asr_kwargs_*.txt
 funasr_*.txt
 
 # --- 本地统计与草稿（不上传）---
-新建文件夹/
 作业解读与项目初步规划.md
 docs/
 report/
