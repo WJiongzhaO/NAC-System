@@ -73,3 +73,10 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# --- TTS 交付打包产物（不入库）---
+TTS_*_deliverable.zip
+output_compare/
+smoke.wav
+output_engine_smoke.wav
+output_fallback_smoke.wav

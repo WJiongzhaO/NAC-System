@@ -26,7 +26,7 @@ from src.llm.deepseek_client import DeepSeekClient
 from src.pipeline.baseline_pipeline import BaselinePipeline
 from src.pipeline.streaming_pipeline import StreamingPipeline
 from src.safety.safety_gate import SafetyGate
-from src.tts.piper_tts import PiperTTS
+from src.tts.tts_engine import create_tts
 
 
 ROOT = Path(__file__).resolve().parent
@@ -40,7 +40,7 @@ class TextRunner:
     def __init__(self):
         self.safety = SafetyGate()
         self._llm: DeepSeekClient | None = None
-        self._tts: PiperTTS | None = None
+        self._tts = None
 
     @property
     def llm(self) -> DeepSeekClient:
@@ -49,9 +49,10 @@ class TextRunner:
         return self._llm
 
     @property
-    def tts(self) -> PiperTTS:
+    def tts(self):
         if self._tts is None:
-            self._tts = PiperTTS(model_path=TTS_MODEL)
+            # 主用 Edge-TTS（在线，中文原生声调），失败自动降级到 Piper 兜底
+            self._tts = create_tts(engine="edge", piper_model_path=TTS_MODEL)
         return self._tts
 
     def run(self, text: str) -> dict:

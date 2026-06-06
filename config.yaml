@@ -36,8 +36,21 @@ llm:
     3. 如果问题超出造船领域范围，请礼貌说明你只能回答造船相关问题。
     4. 回答控制在 3~5 句以内，适合语音播报的长度。
 
-# --- TTS 模块 (Piper TTS / ONNX) ---
+# --- TTS 模块 (Edge-TTS 主引擎 + Piper 兜底) ---
 tts:
+  # —— 引擎选择（优化方向 C：引擎升级）——
+  # edge  : 主用微软 Edge-TTS（在线，中文原生声调建模，音质工业级），
+  #         初始化/合成失败(断网/超时)时自动降级到 Piper，链路永不中断。
+  # piper : 纯离线，仅用 Piper（无网络环境）。
+  engine: "edge"
+  enable_fallback: true              # engine=edge 时，是否启用 Piper 兜底
+  # —— Edge-TTS 参数（engine=edge 生效）——
+  voice: "zh-CN-YunjianNeural"       # 云健：沉稳专业男声(默认)；云扬=YunyangNeural
+  rate: "-5%"                        # 语速，负值更沉稳
+  volume: "+0%"
+  pitch: "+0Hz"
+  proxy: ""                          # 可选 HTTPS 代理；留空走系统 HTTPS_PROXY
+  # —— Piper 参数（engine=piper，或作为 edge 兜底时生效）——
   model_name: "zh_CN-huayan-medium"   # Piper 中文语音包
   # 模型自动下载到 piper 缓存目录
   device: "cpu"                      # ONNX Runtime，CPU 即可实时合成
@@ -47,6 +60,14 @@ tts:
   # SSML 配置（改进阶段启用）
   ssml_enabled: false
   ssml_lexicon: "data/ssml_lexicon.json"
+  # —— 优化方向 A：文本前端规整 (TN) ——
+  text_normalize: true                 # 合成前做术语/数字/单位/符号规整
+  tn_lexicon_path: "data/tn_lexicon.json"   # 造船术语读音扩展词典(可选)
+  # —— 优化方向 B：推理加速 / 量化 ——
+  use_quantized_model: false           # 为 true 时优先加载 *.int8.onnx
+  quantized_model_path: "pretrained_models/piper/zh_CN-huayan-medium.int8.onnx"
+  intra_op_threads: 0                  # 0 = 自动取 CPU 核数
+  inter_op_threads: 1                  # TTS 单流推理建议 1
 
 # --- 安全门控模块 ---
 safety:
