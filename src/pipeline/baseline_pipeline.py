@@ -11,7 +11,7 @@ from typing import Optional
 from src.asr.paraformer_asr import ParaformerASR
 from src.asr.hotwords import load_hotwords
 from src.llm.deepseek_client import DeepSeekClient
-from src.tts.piper_tts import PiperTTS
+from src.tts.tts_engine import create_tts
 from src.safety.safety_gate import SafetyGate
 from src.eval.latency_timer import LatencyTimer, LatencyRecord
 
@@ -37,7 +37,7 @@ class BaselinePipeline:
         # 按需初始化各模块（延迟加载以节省显存）
         self._asr: ParaformerASR | None = None
         self._llm: DeepSeekClient | None = None
-        self._tts: PiperTTS | None = None
+        self._tts = None
         self._safety: SafetyGate | None = None
 
         self._asr_kwargs = {"model_id": asr_model_id, "device": asr_device}
@@ -46,7 +46,7 @@ class BaselinePipeline:
             "api_key": llm_api_key,
             "model": llm_model,
         }
-        self._tts_kwargs = {"model_name": tts_model_name, "model_path": tts_model_path}
+        self._tts_kwargs = {"piper_model_name": tts_model_name, "piper_model_path": tts_model_path}
 
     @property
     def asr(self) -> ParaformerASR:
@@ -61,9 +61,10 @@ class BaselinePipeline:
         return self._llm
 
     @property
-    def tts(self) -> PiperTTS:
+    def tts(self):
         if self._tts is None:
-            self._tts = PiperTTS(**self._tts_kwargs)
+            # 主用 Edge-TTS，失败自动降级到 Piper 兜底
+            self._tts = create_tts(engine="edge", **self._tts_kwargs)
         return self._tts
 
     @property

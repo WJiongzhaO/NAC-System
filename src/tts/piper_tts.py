@@ -14,7 +14,28 @@ import time
 import xml.sax.saxutils as saxutils
 from pathlib import Path
 
+# —— 优化方向 B：在导入 piper(进而导入 onnxruntime) 之前应用线程环境 ——
+try:
+    from src.tts.tts_accel import apply_runtime_env
+    apply_runtime_env()
+except Exception:
+    # 模块缺失或独立运行时不阻断
+    try:
+        from tts_accel import apply_runtime_env  # 同目录独立运行兜底
+        apply_runtime_env()
+    except Exception:
+        pass
+
 from piper import PiperVoice, SynthesisConfig
+
+# —— 优化方向 A：文本前端规整 (可选，缺失则降级为原样输出) ——
+try:
+    from src.tts.text_frontend import TextFrontend
+except Exception:
+    try:
+        from text_frontend import TextFrontend
+    except Exception:
+        TextFrontend = None
 
 
 class PiperTTS:
@@ -25,6 +46,9 @@ class PiperTTS:
         device: str = "cuda",
         ssml_enabled: bool = False,
         ssml_lexicon: dict | None = None,
+        # —— 优化方向 A：文本前端规整 ——
+        text_normalize: bool = True,
+        tn_lexicon_path: str | None = None,
     ):
         self.model_name = model_name
         self.model_path = model_path
@@ -33,6 +57,13 @@ class PiperTTS:
         self.ssml_lexicon = ssml_lexicon or {}
         self._model_path = self._resolve_model_path(model_path, model_name)
         self._voice: PiperVoice | None = None
+
+        # 文本前端规整器 (TextFrontend 不可用时降级为 None → 原样输出)
+        self.text_normalize = bool(text_normalize and TextFrontend is not None)
+        self._frontend = (
+            TextFrontend(extra_lexicon_path=tn_lexicon_path)
+            if self.text_normalize else None
+        )
 
         if not self._model_path.exists():
             raise RuntimeError(f"Piper model not found: {self._model_path}")
@@ -104,6 +135,10 @@ class PiperTTS:
             }
         """
         output = Path(output_path) if output_path else Path(tempfile.mktemp(suffix=".wav"))
+
+        # —— 优化方向 A：合成前做文本前端规整 ——
+        if self._frontend is not None:
+            text = self._frontend.normalize(text)
 
         t0 = time.perf_counter()
         wav_file = None

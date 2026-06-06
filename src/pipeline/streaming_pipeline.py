@@ -16,7 +16,7 @@ from pathlib import Path
 from src.asr.paraformer_asr import ParaformerASR
 from src.asr.hotwords import load_hotwords
 from src.llm.deepseek_client import DeepSeekClient
-from src.tts.piper_tts import PiperTTS
+from src.tts.tts_engine import create_tts
 from src.safety.safety_gate import SafetyGate
 from src.eval.latency_timer import LatencyTimer
 
@@ -59,10 +59,10 @@ class StreamingPipeline:
         if asr_streaming_chunk_size is not None:
             self._asr_kwargs["streaming_chunk_size"] = asr_streaming_chunk_size
         self._llm_kwargs = {"api_base": llm_api_base, "api_key": llm_api_key, "model": llm_model}
-        self._tts_kwargs = {"model_name": tts_model_name, "model_path": tts_model_path}
+        self._tts_kwargs = {"piper_model_name": tts_model_name, "piper_model_path": tts_model_path}
         self._asr: ParaformerASR | None = None
         self._llm: DeepSeekClient | None = None
-        self._tts: PiperTTS | None = None
+        self._tts = None
         self._safety: SafetyGate | None = None
         self._filler_cache: dict[str, str] = {}   # phrase → wav_path
 
@@ -76,7 +76,7 @@ class StreamingPipeline:
         return self._llm
     @property
     def tts(self):
-        if self._tts is None: self._tts = PiperTTS(**self._tts_kwargs)
+        if self._tts is None: self._tts = create_tts(engine="edge", **self._tts_kwargs)
         return self._tts
     @property
     def safety(self):
